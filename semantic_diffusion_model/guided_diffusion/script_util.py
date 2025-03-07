@@ -1,8 +1,8 @@
 import argparse
 
-from . import gaussian_diffusion as gd
-from .respace import SpacedDiffusion, space_timesteps
-from .unet import UNetModel
+from .models import gaussian_diffusion as gd
+from .models.respace import SpacedDiffusion, space_timesteps
+from .models.unet import UNetModel
 
 
 def create_model_and_diffusion(cfg):
@@ -22,7 +22,6 @@ def create_model_and_diffusion(cfg):
         use_scale_shift_norm=cfg.TRAIN.USE_SCALE_SHIFT_NORM,
         dropout=cfg.TRAIN.DROPOUT,
         resblock_updown=cfg.TRAIN.RESBLOCK_UPDOWN,
-        use_fp16=cfg.TRAIN.USE_FP16,
         use_new_attention_order=cfg.TRAIN.USE_NEW_ATTENTION_ORDER,
         no_instance=cfg.TRAIN.NO_INSTANCE,
     )
@@ -46,24 +45,23 @@ def create_model_and_diffusion(cfg):
 
 
 def create_model(
-        image_size,
-        num_classes,
-        num_channels,
-        num_res_blocks,
-        channel_mult="",
-        learn_sigma=False,
-        class_cond=False,
-        use_checkpoint=False,
-        attention_resolutions="16",
-        num_heads=1,
-        num_head_channels=-1,
-        num_heads_upsample=-1,
-        use_scale_shift_norm=False,
-        dropout=0,
-        resblock_updown=False,
-        use_fp16=False,
-        use_new_attention_order=False,
-        no_instance=False,
+    image_size,
+    num_classes,
+    num_channels,
+    num_res_blocks,
+    channel_mult="",
+    learn_sigma=False,
+    class_cond=False,
+    use_checkpoint=False,
+    attention_resolutions="16",
+    num_heads=1,
+    num_head_channels=-1,
+    num_heads_upsample=-1,
+    use_scale_shift_norm=False,
+    dropout=0,
+    resblock_updown=False,
+    use_new_attention_order=False,
+    no_instance=False,
 ):
     if channel_mult is None:
         if image_size == 512:
@@ -87,7 +85,7 @@ def create_model(
 
     return UNetModel(
         image_size=image_size,
-        in_channels=3, 
+        in_channels=3,
         model_channels=num_channels,
         out_channels=(3 if not learn_sigma else 6),
         num_res_blocks=num_res_blocks,
@@ -96,7 +94,6 @@ def create_model(
         channel_mult=channel_mult,
         num_classes=(num_classes if class_cond else None),
         use_checkpoint=use_checkpoint,
-        use_fp16=use_fp16,
         num_heads=num_heads,
         num_head_channels=num_head_channels,
         num_heads_upsample=num_heads_upsample,
@@ -107,30 +104,32 @@ def create_model(
 
 
 def create_gaussian_diffusion(
-        *,
-        steps=1000,
-        learn_sigma=False,
-        sigma_small=False,
-        noise_schedule="linear",
-        b_map_scheduler_type="linear",
-        use_kl=False,
-        predict_xstart=False,
-        rescale_timesteps=False,
-        rescale_learned_sigmas=False,
-        timestep_respacing="",
-        image_size=256,
-        b_map_min=1.0,
-        dataset_mode="camus",
-        preserve_length=False,
-        add_buffer=False,
+    *,
+    steps=1000,
+    learn_sigma=False,
+    sigma_small=False,
+    noise_schedule="linear",
+    b_map_scheduler_type="linear",
+    use_kl=False,
+    predict_xstart=False,
+    rescale_timesteps=False,
+    rescale_learned_sigmas=False,
+    timestep_respacing="",
+    image_size=256,
+    b_map_min=1.0,
+    dataset_mode="camus",
+    preserve_length=False,
+    add_buffer=False,
 ):
     betas = gd.get_named_beta_schedule(noise_schedule, steps)
-    b_betas = gd.get_named_bmap_schedule(b_map_scheduler_type, steps, add_buffer=add_buffer)
-    if use_kl: 
+    b_betas = gd.get_named_bmap_schedule(
+        b_map_scheduler_type, steps, add_buffer=add_buffer
+    )
+    if use_kl:
         loss_type = gd.LossType.RESCALED_KL
-    elif rescale_learned_sigmas: 
+    elif rescale_learned_sigmas:
         loss_type = gd.LossType.RESCALED_MSE
-    else: 
+    else:
         loss_type = gd.LossType.MSE
     if not timestep_respacing:
         timestep_respacing = [steps]

@@ -11,14 +11,20 @@ The code has been further adapted to support B-maps and curvilinear probes.
 import enum
 import math
 
-import numpy as np
-import torch as th
-
-from .losses import normal_kl, discretized_gaussian_log_likelihood
-from .nn import mean_flat
-
 import matplotlib.pyplot as plt
+import numpy as np
+import torch
 import torch.nn.functional as F
+
+from .losses import discretized_gaussian_log_likelihood, normal_kl
+
+
+def mean_flat(tensor):
+    """
+    Take the mean over all non-batch dimensions.
+    """
+    return tensor.mean(dim=list(range(1, len(tensor.shape))))
+
 
 # --------------------------- Betas scheduler --------------------------- #
 def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
@@ -75,9 +81,13 @@ def betas_for_alpha_bar(num_diffusion_timesteps, alpha_bar, max_beta=0.999):
         betas.append(min(1 - alpha_bar(t2) / alpha_bar(t1), max_beta))
     return np.array(betas)
 
+
 # ------------------------------------- B-maps scheduler ------------------------------------- #
 
-def get_named_bmap_schedule(b_map_scheduler_type, num_diffusion_timesteps, add_buffer=False):
+
+def get_named_bmap_schedule(
+    b_map_scheduler_type, num_diffusion_timesteps, add_buffer=False
+):
     """
     Get a pre-defined B-maps schedule for the given name.
 
@@ -90,11 +100,12 @@ def get_named_bmap_schedule(b_map_scheduler_type, num_diffusion_timesteps, add_b
     if add_buffer:  # add a buffer at the beginning of the schedule and set the first values to epsilon
         buffer = int(0.05 * num_diffusion_timesteps)
         b_beta[:buffer] = 1e-8
-        b_beta[buffer:] = get_named_bmap_schedule(b_map_scheduler_type, num_diffusion_timesteps - buffer, add_buffer=False)
+        b_beta[buffer:] = get_named_bmap_schedule(
+            b_map_scheduler_type, num_diffusion_timesteps - buffer, add_buffer=False
+        )
         return b_beta
 
     for t in range(num_diffusion_timesteps):
-
         if b_map_scheduler_type == "linear":
             b_beta[t] = (t + 1e-8) / (num_diffusion_timesteps - 1)
         elif b_map_scheduler_type == "cosine":
@@ -105,12 +116,21 @@ def get_named_bmap_schedule(b_map_scheduler_type, num_diffusion_timesteps, add_b
         elif b_map_scheduler_type == "sqrt":
             b_beta[t] = ((t + 1e-8) / (num_diffusion_timesteps - 1)) ** 0.5
         else:
-            raise NotImplementedError(f"unknown B-maps schedule: {b_map_scheduler_type}")
+            raise NotImplementedError(
+                f"unknown B-maps schedule: {b_map_scheduler_type}"
+            )
     return b_beta
 
 
-def matrix_schedule_for_linear_probe(matrix_height, matrix_width, channels, b_betas, epsilon=1, preserve_length=False,
-                                     bottom_to_top=False):
+def matrix_schedule_for_linear_probe(
+    matrix_height,
+    matrix_width,
+    channels,
+    b_betas,
+    epsilon=1,
+    preserve_length=False,
+    bottom_to_top=False,
+):
     """
     Get a pre-defined B-maps schedule for the linspace, the only one implemented for now.
 
@@ -128,17 +148,18 @@ def matrix_schedule_for_linear_probe(matrix_height, matrix_width, channels, b_be
         epsilon (float): The smallest value the matrices can take, preventing division by zero in subsequent operations.
         preserve_length (bool): If True, the length of the preserved part of the matrix is proportional to the time factor.
         bottom_to_top (bool): If True, the matrix values decrease from bottom to top, instead of top to bottom. This is used only for sanity checks.
-    
+
     Returns:
         all_matrices (Tensor): A tensor containing the generated matrices for each timestep.
     """
     # Create a tensor to hold all the matrices
-    all_matrices = th.empty((b_betas.shape[0], channels, matrix_height, matrix_width))
+    all_matrices = torch.empty(
+        (b_betas.shape[0], channels, matrix_height, matrix_width)
+    )
     lower_bounds = 1 - b_betas * (1 - epsilon)
 
     # Iterate through each timestep to create each matrix
     for t, b_beta in enumerate(b_betas):
-
         time_factor = b_beta
 
         # If the preserve_length flag is set, the length of the preserved part of the matrix is proportional to the time factor
@@ -150,26 +171,33 @@ def matrix_schedule_for_linear_probe(matrix_height, matrix_width, channels, b_be
             preserved_length = 0
 
         # Create a bias matrix for the current timestep
-        bias_matrix = th.ones(matrix_height, dtype=th.float32)
-        bias_matrix[preserved_length:] = th.linspace(1, lower_bounds[t], steps=matrix_height - preserved_length)
+        bias_matrix = torch.ones(matrix_height, dtype=torch.float32)
+        bias_matrix[preserved_length:] = torch.linspace(
+            1, lower_bounds[t], steps=matrix_height - preserved_length
+        )
 
-        bias_matrix = th.sqrt(bias_matrix)
+        bias_matrix = torch.sqrt(bias_matrix)
 
         # If the bottom_to_top flag is set, the matrix values decrease from bottom to top
         if bottom_to_top:
             bias_matrix = bias_matrix.flip(0)
 
-        bias_matrix = bias_matrix.view(1, 1, matrix_height, 1).repeat(1, channels, 1, matrix_width)
+        bias_matrix = bias_matrix.view(1, 1, matrix_height, 1).repeat(
+            1, channels, 1, matrix_width
+        )
 
         # Assign the bias matrix to the corresponding timestep in the tensor
         all_matrices[t] = bias_matrix
-    
+
     return all_matrices
 
 
 # ------------------------------------- Curvilinear probe b-maps ------------------------------------- #
 
-def point_in_fan(x, y, offset_x, offset_y, short_radius, long_radius, opening_angle_deg):
+
+def point_in_fan(
+    x, y, offset_x, offset_y, short_radius, long_radius, opening_angle_deg
+):
     # Convert opening angle from degrees to radians
     opening_angle_rad = np.deg2rad(opening_angle_deg)
 
@@ -177,7 +205,7 @@ def point_in_fan(x, y, offset_x, offset_y, short_radius, long_radius, opening_an
     origin = (offset_x, offset_y - short_radius)
     dx, dy = x - origin[0], y - origin[1]
     angle = np.arctan2(dx, dy)
-    distance = np.sqrt(dx ** 2 + dy ** 2)
+    distance = np.sqrt(dx**2 + dy**2)
 
     # Check if the point is within the fan's angle and radius bounds
     within_angle = np.abs(angle) <= opening_angle_rad
@@ -192,20 +220,36 @@ def point_in_fan(x, y, offset_x, offset_y, short_radius, long_radius, opening_an
     return value
 
 
-def create_distance_map(offset_x, offset_y, short_radius, long_radius, opening_angle, width, height):
+def create_distance_map(
+    offset_x, offset_y, short_radius, long_radius, opening_angle, width, height
+):
     # Initialize the 2D array
     distance_map = np.zeros((height, width))
 
     # Iterate over each point in the array
     for y in range(height):
         for x in range(width):
-            distance = point_in_fan(x, y, offset_x, offset_y, short_radius, long_radius, opening_angle)
-            distance_map[y, x] = (distance - short_radius) / (long_radius - short_radius) if distance != -1 else -1
+            distance = point_in_fan(
+                x, y, offset_x, offset_y, short_radius, long_radius, opening_angle
+            )
+            distance_map[y, x] = (
+                (distance - short_radius) / (long_radius - short_radius)
+                if distance != -1
+                else -1
+            )
 
     return distance_map
 
 
-def matrix_schedule_for_convex_probe(matrix_height, matrix_width, channels, b_betas, epsilon=1, dataset_mode='camus', preserve_length=False):
+def matrix_schedule_for_convex_probe(
+    matrix_height,
+    matrix_width,
+    channels,
+    b_betas,
+    epsilon=1,
+    dataset_mode="camus",
+    preserve_length=False,
+):
     """
     Get a pre-defined B-maps schedule for the linspace, the only one implemented for now.
 
@@ -225,17 +269,29 @@ def matrix_schedule_for_convex_probe(matrix_height, matrix_width, channels, b_be
     Returns:
         all_matrices (Tensor): A tensor containing the generated matrices for each timestep.
     """
-    if 'camus' in dataset_mode:
-        long_radius, offset_x, offset_y, opening_angle, short_radius = camus_fan_param(matrix_width)
+    if "camus" in dataset_mode:
+        long_radius, offset_x, offset_y, opening_angle, short_radius = camus_fan_param(
+            matrix_width
+        )
     else:
-        raise ValueError('Invalid dataset mode')
+        raise ValueError("Invalid dataset mode")
 
-    distance_map = create_distance_map(offset_x, offset_y, short_radius, long_radius, opening_angle, matrix_width, matrix_height)
-    distance_map = th.tensor(distance_map, dtype=th.float32)
+    distance_map = create_distance_map(
+        offset_x,
+        offset_y,
+        short_radius,
+        long_radius,
+        opening_angle,
+        matrix_width,
+        matrix_height,
+    )
+    distance_map = torch.tensor(distance_map, dtype=torch.float32)
 
     # Create a tensor to hold all the matrices
     # Create a tensor to hold all the matrices
-    all_matrices = th.empty((b_betas.shape[0], channels, matrix_height, matrix_width))
+    all_matrices = torch.empty(
+        (b_betas.shape[0], channels, matrix_height, matrix_width)
+    )
     lower_bounds = 1 - b_betas * (1 - epsilon)
 
     # Iterate through each timestep to create each matrix
@@ -248,12 +304,14 @@ def matrix_schedule_for_convex_probe(matrix_height, matrix_width, channels, b_be
             preserved_ratio = 0
 
         # Create a bias matrix for the current timestep
-        bias_matrix = th.ones((matrix_height, matrix_width), dtype=th.float32)
+        bias_matrix = torch.ones((matrix_height, matrix_width), dtype=torch.float32)
 
         idx = distance_map >= preserved_ratio
-        bias_matrix[idx] = 1 - (distance_map[idx] - preserved_ratio)/(1 - preserved_ratio + 1e-6) * (1 - lower_bounds[t])
+        bias_matrix[idx] = 1 - (distance_map[idx] - preserved_ratio) / (
+            1 - preserved_ratio + 1e-6
+        ) * (1 - lower_bounds[t])
 
-        bias_matrix = th.sqrt(bias_matrix)
+        bias_matrix = torch.sqrt(bias_matrix)
 
         # make sure there are no 0s in the matrix
         assert (bias_matrix == 0).sum() == 0
@@ -281,7 +339,7 @@ def camus_fan_param(matrix_width):
     return long_radius, offset_x, offset_y, opening_angle, short_radius
 
 
-def log_bmaps(map_: th.Tensor, name: str):
+def log_bmaps(map_: torch.Tensor, name: str):
     """
     Save a B-maps matrix to output dir.
 
@@ -294,7 +352,7 @@ def log_bmaps(map_: th.Tensor, name: str):
 
     # Calculate quantiles to index maps
     T = map_.shape[0]
-    quantiles = th.linspace(0, 1, steps=10)
+    quantiles = torch.linspace(0, 1, steps=10)
 
     # Create a subplot: 1 row, 10 columns
     fig, axes = plt.subplots(1, 10, figsize=(20, 2), sharex=True, sharey=True)
@@ -302,23 +360,27 @@ def log_bmaps(map_: th.Tensor, name: str):
 
     for i, q in enumerate(quantiles):
         # Calculate the quantile index
-        idx = int(th.quantile(th.arange(T).float(), q).item())
+        idx = int(torch.quantile(torch.arange(T).float(), q).item())
 
         # Select the map at the calculated index
-        selected_map = map_[idx, 0, :, :]  # Assuming we use the first channel for visualization
+        selected_map = map_[
+            idx, 0, :, :
+        ]  # Assuming we use the first channel for visualization
 
         # Plot the map with the colormap
-        im = axes[i].imshow(selected_map, cmap='viridis', vmin=0, vmax=1)
-        axes[i].axis('off')  # Hide axis for better visualization
+        im = axes[i].imshow(selected_map, cmap="viridis", vmin=0, vmax=1)
+        axes[i].axis("off")  # Hide axis for better visualization
 
     # Place a color bar on the right side of the last subplot
     # Create an additional axes on the right for the colorbar
-    fig.subplots_adjust(right=0.87)  # Adjust the right parameter to give some space for the colorbar
+    fig.subplots_adjust(
+        right=0.87
+    )  # Adjust the right parameter to give some space for the colorbar
     cbar_ax = fig.add_axes([0.89, 0.15, 0.015, 0.7])  # Position for the colorbar
     fig.colorbar(im, cax=cbar_ax)  # Add colorbar referencing the imshow object 'im
 
     # Save the plot to the output directory
-    plt.savefig(f'output/{name}.png')
+    plt.savefig(f"output/{name}.png")
 
     # Close the plot to free memory
     plt.close(fig)
@@ -381,19 +443,19 @@ class GaussianDiffusion:
     """
 
     def __init__(
-            self,
-            *,
-            betas,
-            b_betas,
-            model_mean_type,
-            model_var_type,
-            loss_type,
-            rescale_timesteps=False,
-            image_size=256,
-            b_map_min=1.0,
-            dataset_mode="camus",
-            b_maps=None,
-            preserve_length=False,
+        self,
+        *,
+        betas,
+        b_betas,
+        model_mean_type,
+        model_var_type,
+        loss_type,
+        rescale_timesteps=False,
+        image_size=256,
+        b_map_min=1.0,
+        dataset_mode="camus",
+        b_maps=None,
+        preserve_length=False,
     ):
         self.model_mean_type = model_mean_type
         self.model_var_type = model_var_type
@@ -405,85 +467,103 @@ class GaussianDiffusion:
         self.betas = betas
 
         assert len(betas.shape) == 1, "betas must be 1-D"
-        assert (betas > 0).all() and (betas <= 1).all() # "betas must be in (0, 1]"
+        assert (betas > 0).all() and (betas <= 1).all()  # "betas must be in (0, 1]"
 
         b_betas = np.array(b_betas, dtype=np.float64)
         self.b_betas = b_betas
         assert len(b_betas.shape) == 1, "b_betas must be 1-D"
 
-        self.num_timesteps = int(betas.shape[0]) 
+        self.num_timesteps = int(betas.shape[0])
 
         # pre-define B-maps
         if b_maps is not None:
             self.b_maps = b_maps
         else:
             if dataset_mode == "camus" in dataset_mode:
-                self.b_maps = matrix_schedule_for_convex_probe(self.image_size, self.image_size, 3, b_betas=b_betas,
-                                                               epsilon=b_map_min, dataset_mode=dataset_mode,
-                                                               preserve_length=preserve_length)
+                self.b_maps = matrix_schedule_for_convex_probe(
+                    self.image_size,
+                    self.image_size,
+                    3,
+                    b_betas=b_betas,
+                    epsilon=b_map_min,
+                    dataset_mode=dataset_mode,
+                    preserve_length=preserve_length,
+                )
             else:
-                self.b_maps = matrix_schedule_for_linear_probe(self.image_size, self.image_size, 3, b_betas=b_betas,
-                                                               epsilon=b_map_min, preserve_length=preserve_length)
+                self.b_maps = matrix_schedule_for_linear_probe(
+                    self.image_size,
+                    self.image_size,
+                    3,
+                    b_betas=b_betas,
+                    epsilon=b_map_min,
+                    preserve_length=preserve_length,
+                )
 
         alphas = 1.0 - betas
         self.alphas = alphas
         self.alphas_cumprod = np.cumprod(alphas, axis=0)
-        self.b_cumprod = th.cumprod(self.b_maps, axis=0)
+        self.b_cumprod = torch.cumprod(self.b_maps, axis=0)
 
         self.alphas_cumprod_prev = np.append(1.0, self.alphas_cumprod[:-1])
-        self.b_cumprod_prev = F.pad(self.b_cumprod[:-1], (0, 0, 0, 0, 0, 0, 1, 0), value=1.0)
+        self.b_cumprod_prev = F.pad(
+            self.b_cumprod[:-1], (0, 0, 0, 0, 0, 0, 1, 0), value=1.0
+        )
 
         self.alphas_cumprod_next = np.append(self.alphas_cumprod[1:], 0.0)
-        self.b_cumprod_next = F.pad(self.b_cumprod[1:], (0, 0, 0, 0, 0, 0, 0, 1), value=1.0)
+        self.b_cumprod_next = F.pad(
+            self.b_cumprod[1:], (0, 0, 0, 0, 0, 0, 0, 1), value=1.0
+        )
 
         assert self.alphas_cumprod_prev.shape == (self.num_timesteps,)
 
         # calculations for diffusion q(x_t | x_{t-1}) and others
         self.sqrt_alphas_cumprod = np.sqrt(self.alphas_cumprod)
-        self.sqrt_b_cumprod = th.sqrt(self.b_cumprod)
+        self.sqrt_b_cumprod = torch.sqrt(self.b_cumprod)
 
         self.sqrt_recip_alphas_cumprod = np.sqrt(1.0 / self.alphas_cumprod)
-        self.sqrt_recip_b_cumprod = th.sqrt(1.0 / self.b_cumprod)
+        self.sqrt_recip_b_cumprod = torch.sqrt(1.0 / self.b_cumprod)
 
-        log_bmaps(self.b_maps, 'b_maps')
-        log_bmaps(self.b_cumprod, 'b_cumprod')
-        log_bmaps(self.b_cumprod_prev, 'b_cumprod_prev')
-        log_bmaps(self.b_cumprod_next, 'b_cumprod_next')
+        log_bmaps(self.b_maps, "b_maps")
+        log_bmaps(self.b_cumprod, "b_cumprod")
+        log_bmaps(self.b_cumprod_prev, "b_cumprod_prev")
+        log_bmaps(self.b_cumprod_next, "b_cumprod_next")
 
     def q_mean_variance(self, x_start, t):
         """
         Get the distribution q(x_t | x_0).
 
-        In our case, it's a normal distribution with: 
-        mean = √alpha_cumprod_t * √B_cumprod_t * x_0 
+        In our case, it's a normal distribution with:
+        mean = √alpha_cumprod_t * √B_cumprod_t * x_0
         and variance = sqrt(1 - alpha_cumprod_t * B_cumprod_t) I .
         https://arxiv.org/abs/2407.05428
 
-        In the original diffusion model without B-maps: 
+        In the original diffusion model without B-maps:
         mean = √alpha_cumprod_t * x_0
         and variance = sqrt(1 - alpha_cumprod_t) I .
 
-        Closed-form solution for the mean and variance of q(x_t | x_0): 
+        Closed-form solution for the mean and variance of q(x_t | x_0):
 
         :param x_start: the [N x C x ...] tensor of noiseless inputs.
         :param t: the number of diffusion steps (minus 1). Here, 0 means one step.
         :return: A tuple (mean, variance, log_variance), all of x_start's shape.
         """
 
-        sqrt_alphas_cumprod_t = _extract_into_tensor(self.sqrt_alphas_cumprod, t, x_start.shape) 
+        sqrt_alphas_cumprod_t = _extract_into_tensor(
+            self.sqrt_alphas_cumprod, t, x_start.shape
+        )
         sqrt_B_cumprod_t = _extract_into_B_tensor(self.sqrt_b_cumprod, t)
-        
-        # mean = √alpha_cumprod_t * √B_cumprod_t * x_0 
+
+        # mean = √alpha_cumprod_t * √B_cumprod_t * x_0
         mean = sqrt_alphas_cumprod_t * sqrt_B_cumprod_t * x_start
-        
+
         # variance = sqrt(1 - alpha_cumprod_t * B_cumprod_t) I
 
         alpha_cumprod_t = _extract_into_tensor(self.alphas_cumprod, t, x_start.shape)
         B_cumprod_t = _extract_into_B_tensor(self.b_cumprod, t)
 
-        variance = th.sqrt(1 - alpha_cumprod_t * B_cumprod_t)
+        variance = torch.sqrt(1 - alpha_cumprod_t * B_cumprod_t)
 
-        log_variance = th.log(variance)
+        log_variance = torch.log(variance)
 
         return mean, variance, log_variance
 
@@ -491,10 +571,10 @@ class GaussianDiffusion:
         """
         Diffuse the data for a given number of diffusion steps.
 
-        In other words, sample from q(x_t | x_0). 
+        In other words, sample from q(x_t | x_0).
 
-        In our case, it's a normal distribution with: 
-        mean = √alpha_cumprod_t * √B_cumprod_t * x_0 
+        In our case, it's a normal distribution with:
+        mean = √alpha_cumprod_t * √B_cumprod_t * x_0
         and variance = sqrt(1 - alpha_cumprod_t * B_cumprod_t) I .
         https://arxiv.org/abs/2407.05428
 
@@ -504,7 +584,7 @@ class GaussianDiffusion:
         :return: A noisy version of x_start.
         """
         if noise is None:
-            noise = th.randn_like(x_start)
+            noise = torch.randn_like(x_start)
         assert noise.shape == x_start.shape
 
         q_mean, q_variance, _ = self.q_mean_variance(x_start, t)
@@ -515,7 +595,7 @@ class GaussianDiffusion:
         """
         Compute the mean and variance of the diffusion posterior:
 
-            q(x_{t-1} | x_t, x_0) 
+            q(x_{t-1} | x_t, x_0)
 
         """
         assert x_start.shape == x_t.shape
@@ -525,7 +605,9 @@ class GaussianDiffusion:
         # ---------------------------------------------------------------------------------------
 
         alphas_t = _extract_into_tensor(self.alphas, t, x_t.shape)
-        alphas_cumprod_prev_t = _extract_into_tensor(self.alphas_cumprod_prev, t, x_t.shape)
+        alphas_cumprod_prev_t = _extract_into_tensor(
+            self.alphas_cumprod_prev, t, x_t.shape
+        )
         alphas_cumprod_t = _extract_into_tensor(self.alphas_cumprod, t, x_t.shape)
 
         b_maps_t = _extract_into_B_tensor(self.b_maps, t)
@@ -534,46 +616,45 @@ class GaussianDiffusion:
 
         posterior_mean_coef1_t = (
             (1.0 - alphas_t * b_maps_t)
-            * th.sqrt(alphas_cumprod_prev_t * b_cumprod_prev_t) \
+            * torch.sqrt(alphas_cumprod_prev_t * b_cumprod_prev_t)
             / (1.0 - alphas_cumprod_t * b_cumprod_t)
         )
 
         posterior_mean_coef2_t = (
-            (1.0 - alphas_cumprod_prev_t * b_cumprod_prev_t) 
-            * th.sqrt(alphas_t * b_maps_t) \
+            (1.0 - alphas_cumprod_prev_t * b_cumprod_prev_t)
+            * torch.sqrt(alphas_t * b_maps_t)
             / (1.0 - alphas_cumprod_t * b_cumprod_t)
         )
 
         posterior_mean_t = (
-            posterior_mean_coef1_t * x_start
-            + posterior_mean_coef2_t * x_t
+            posterior_mean_coef1_t * x_start + posterior_mean_coef2_t * x_t
         )
 
         # --------------------------- Closed Form for the Variance: --------------------------------
         # self.posterior_variance = (
         #    (1.0 - alphas * self.b_maps) * (1.0 - self.alphas_cumprod_prev * self.b_cumprod_prev) \
         #    / (1.0 - self.alphas_cumprod * self.b_cumprod)
-        #)
+        # )
         # ---------------------------------------------------------------------------------------
 
         posterior_variance_t = (
-            (1.0 - alphas_t * b_maps_t) * (1.0 - alphas_cumprod_prev_t * b_cumprod_prev_t) \
+            (1.0 - alphas_t * b_maps_t)
+            * (1.0 - alphas_cumprod_prev_t * b_cumprod_prev_t)
             / (1.0 - alphas_cumprod_t * b_cumprod_t)
         )
 
-        posterior_log_variance_clipped_t = th.log(posterior_variance_t)
+        posterior_log_variance_clipped_t = torch.log(posterior_variance_t)
 
         assert (
-                posterior_mean_t.shape[0]
-                == posterior_variance_t.shape[0]
-                == posterior_log_variance_clipped_t.shape[0]
-                == x_start.shape[0]
+            posterior_mean_t.shape[0]
+            == posterior_variance_t.shape[0]
+            == posterior_log_variance_clipped_t.shape[0]
+            == x_start.shape[0]
         )
         return posterior_mean_t, posterior_variance_t, posterior_log_variance_clipped_t
-    
 
     def p_mean_variance(
-            self, model, x, t, clip_denoised=True, denoised_fn=None, model_kwargs=None
+        self, model, x, t, clip_denoised=True, denoised_fn=None, model_kwargs=None
     ):
         """
         Apply the model to get p(x_{t-1} | x_t), as well as a prediction of
@@ -600,8 +681,8 @@ class GaussianDiffusion:
 
         B, C = x.shape[:2]
         assert t.shape == (B,)
-        if 'y' in model_kwargs:
-            model_output = model(x, self._scale_timesteps(t), y=model_kwargs['y'])
+        if "y" in model_kwargs:
+            model_output = model(x, self._scale_timesteps(t), y=model_kwargs["y"])
         else:
             model_output = model(x, self._scale_timesteps(t), **model_kwargs)
 
@@ -615,11 +696,11 @@ class GaussianDiffusion:
 
         if self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
             assert model_output.shape == (B, C * 2, *x.shape[2:])
-            model_output, model_var_values = th.split(model_output, C, dim=1)
+            model_output, model_var_values = torch.split(model_output, C, dim=1)
             if self.model_var_type == ModelVarType.LEARNED:
                 model_log_variance = model_var_values
-                model_variance = th.exp(model_log_variance)
-            
+                model_variance = torch.exp(model_log_variance)
+
             else:
                 _, _, posterior_log_variance_clipped_t = self.q_posterior_mean_variance(
                     x_start=x, x_t=x, t=t
@@ -629,24 +710,29 @@ class GaussianDiffusion:
                 alphas_t = _extract_into_tensor(self.alphas, t, x.shape)
                 B_t = _extract_into_B_tensor(self.b_maps, t)
 
-                max_log = th.log(1 - alphas_t * B_t)
-                
+                max_log = torch.log(1 - alphas_t * B_t)
+
                 # The model_var_values is [-1, 1] for [min_var, max_var].
                 frac = (model_var_values + 1) / 2
                 model_log_variance = frac * max_log + (1 - frac) * min_log
-                model_variance = th.exp(model_log_variance)
-                
-        else: 
-            raise NotImplementedError(self.model_var_type) 
+                model_variance = torch.exp(model_log_variance)
+
+        else:
+            raise NotImplementedError(self.model_var_type)
 
         def process_xstart(x):
             if denoised_fn is not None:
                 x = denoised_fn(x)
             if clip_denoised:
                 x = x.clamp(-1, 1)
-                if 'mean' in model_kwargs and 'std' in model_kwargs:
-                    x = (x - x.mean(dim=(2, 3), keepdim=True)) / x.std(dim=(2, 3), keepdim=True)
-                    x = x * model_kwargs["std"][None, :, None, None] + model_kwargs["mean"][None, :, None, None]
+                if "mean" in model_kwargs and "std" in model_kwargs:
+                    x = (x - x.mean(dim=(2, 3), keepdim=True)) / x.std(
+                        dim=(2, 3), keepdim=True
+                    )
+                    x = (
+                        x * model_kwargs["std"][None, :, None, None]
+                        + model_kwargs["mean"][None, :, None, None]
+                    )
             return x
 
         if self.model_mean_type == ModelMeanType.PREVIOUS_X:
@@ -668,7 +754,7 @@ class GaussianDiffusion:
             raise NotImplementedError(self.model_mean_type)
 
         assert (
-                model_mean.shape == model_log_variance.shape == pred_xstart.shape == x.shape
+            model_mean.shape == model_log_variance.shape == pred_xstart.shape == x.shape
         )
 
         return {
@@ -686,14 +772,18 @@ class GaussianDiffusion:
 
         # self.sqrt_recipm1_alphas_cumprod = np.sqrt(1.0 / self.alphas_cumprod - 1)
         """
-        sqrt_recip_alphas_cumprod_t = _extract_into_tensor(self.sqrt_recip_alphas_cumprod, t, x_t.shape)
+        sqrt_recip_alphas_cumprod_t = _extract_into_tensor(
+            self.sqrt_recip_alphas_cumprod, t, x_t.shape
+        )
         sqrt_recip_b_cumprod_t = _extract_into_B_tensor(self.sqrt_recip_b_cumprod, t)
         alpha_cumprod_t = _extract_into_tensor(self.alphas_cumprod, t, x_t.shape)
         b_cumprod_t = _extract_into_B_tensor(self.b_cumprod, t)
-        sqrt_recipm1_alphas_bs_cumprod_t = th.sqrt(1.0 / (alpha_cumprod_t * b_cumprod_t) - 1)
+        sqrt_recipm1_alphas_bs_cumprod_t = torch.sqrt(
+            1.0 / (alpha_cumprod_t * b_cumprod_t) - 1
+        )
 
         return (
-            sqrt_recip_alphas_cumprod_t * sqrt_recip_b_cumprod_t * x_t \
+            sqrt_recip_alphas_cumprod_t * sqrt_recip_b_cumprod_t * x_t
             - sqrt_recipm1_alphas_bs_cumprod_t * eps
         )
 
@@ -702,39 +792,44 @@ class GaussianDiffusion:
 
         alphas_t = _extract_into_tensor(self.alphas, t, x_t.shape)
         b_maps_t = _extract_into_B_tensor(self.b_maps, t)
-        alphas_cumprod_prev_t = _extract_into_tensor(self.alphas_cumprod_prev, t, x_t.shape)
+        alphas_cumprod_prev_t = _extract_into_tensor(
+            self.alphas_cumprod_prev, t, x_t.shape
+        )
         b_cumprod_prev_t = _extract_into_B_tensor(self.b_cumprod_prev, t)
         alphas_cumprod_t = _extract_into_tensor(self.alphas_cumprod, t, x_t.shape)
         b_cumprod_t = _extract_into_B_tensor(self.b_cumprod, t)
 
         posterior_mean_coef1_t = (
             (1.0 - alphas_t * b_maps_t)
-            * th.sqrt(alphas_cumprod_prev_t * b_cumprod_prev_t) \
+            * torch.sqrt(alphas_cumprod_prev_t * b_cumprod_prev_t)
             / (1.0 - alphas_cumprod_t * b_cumprod_t)
         )
 
         posterior_mean_coef2_t = (
-            (1.0 - alphas_cumprod_prev_t * b_cumprod_prev_t) 
-            * th.sqrt(alphas_t * b_maps_t) \
+            (1.0 - alphas_cumprod_prev_t * b_cumprod_prev_t)
+            * torch.sqrt(alphas_t * b_maps_t)
             / (1.0 - alphas_cumprod_t * b_cumprod_t)
         )
-        return ( # (xprev - coef2*x_t) / coef1
-            (1.0 / posterior_mean_coef1_t) * xprev 
+        return (  # (xprev - coef2*x_t) / coef1
+            (1.0 / posterior_mean_coef1_t) * xprev
             - (posterior_mean_coef2_t / posterior_mean_coef1_t) * x_t
         )
 
     def _predict_eps_from_xstart(self, x_t, t, pred_xstart):
-        sqrt_recip_alphas_cumprod_t = _extract_into_tensor(self.sqrt_recip_alphas_cumprod, t, x_t.shape)
+        sqrt_recip_alphas_cumprod_t = _extract_into_tensor(
+            self.sqrt_recip_alphas_cumprod, t, x_t.shape
+        )
         sqrt_recip_b_cumprod_t = _extract_into_B_tensor(self.sqrt_recip_b_cumprod, t)
 
         alpha_cumprod_t = _extract_into_tensor(self.alphas_cumprod, t, x_t.shape)
         b_cumprod_t = _extract_into_B_tensor(self.b_cumprod, t)
-        sqrt_recipm1_alphas_bs_cumprod_t = th.sqrt(1.0 / (alpha_cumprod_t * b_cumprod_t) - 1)
+        sqrt_recipm1_alphas_bs_cumprod_t = torch.sqrt(
+            1.0 / (alpha_cumprod_t * b_cumprod_t) - 1
+        )
 
         return (
-            (sqrt_recip_alphas_cumprod_t * sqrt_recip_b_cumprod_t * x_t - pred_xstart) \
-            / sqrt_recipm1_alphas_bs_cumprod_t
-        )
+            sqrt_recip_alphas_cumprod_t * sqrt_recip_b_cumprod_t * x_t - pred_xstart
+        ) / sqrt_recipm1_alphas_bs_cumprod_t
 
     def _scale_timesteps(self, t):
         if self.rescale_timesteps:
@@ -752,7 +847,7 @@ class GaussianDiffusion:
         """
         gradient = cond_fn(x, self._scale_timesteps(t), **model_kwargs)
         new_mean = (
-                p_mean_var["mean"].float() + p_mean_var["variance"] * gradient.float()
+            p_mean_var["mean"].float() + p_mean_var["variance"] * gradient.float()
         )
         return new_mean
 
@@ -770,7 +865,7 @@ class GaussianDiffusion:
         b_cumprod = _extract_into_B_tensor(self.b_cumprod, t)
 
         eps = self._predict_eps_from_xstart(x, t, p_mean_var["pred_xstart"])
-        eps = eps - (1 - alpha_bar*b_cumprod).sqrt() * cond_fn(
+        eps = eps - (1 - alpha_bar * b_cumprod).sqrt() * cond_fn(
             x, self._scale_timesteps(t), **model_kwargs
         )
 
@@ -782,14 +877,14 @@ class GaussianDiffusion:
         return out
 
     def p_sample(
-            self,
-            model,
-            x,
-            t,
-            clip_denoised=True,
-            denoised_fn=None,
-            cond_fn=None,
-            model_kwargs=None,
+        self,
+        model,
+        x,
+        t,
+        clip_denoised=True,
+        denoised_fn=None,
+        cond_fn=None,
+        model_kwargs=None,
     ):
         """
         Sample x_{t-1} from the model at the given timestep.
@@ -817,7 +912,7 @@ class GaussianDiffusion:
             model_kwargs=model_kwargs,
         )
 
-        noise = th.randn_like(x)
+        noise = torch.randn_like(x)
 
         nonzero_mask = (
             (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
@@ -827,20 +922,22 @@ class GaussianDiffusion:
             out["mean"] = self.condition_mean(
                 cond_fn, out, x, t, model_kwargs=model_kwargs
             )
-        sample = out["mean"] + nonzero_mask * th.exp(0.5 * out["log_variance"]) * noise
+        sample = (
+            out["mean"] + nonzero_mask * torch.exp(0.5 * out["log_variance"]) * noise
+        )
         return {"sample": sample, "pred_xstart": out["pred_xstart"]}
 
     def p_sample_loop(
-            self,
-            model,
-            shape,
-            noise=None,
-            clip_denoised=True,
-            denoised_fn=None,
-            cond_fn=None,
-            model_kwargs=None,
-            device=None,
-            progress=False,
+        self,
+        model,
+        shape,
+        noise=None,
+        clip_denoised=True,
+        denoised_fn=None,
+        cond_fn=None,
+        model_kwargs=None,
+        device=None,
+        progress=False,
     ):
         """
         Generate samples from the model.
@@ -863,30 +960,30 @@ class GaussianDiffusion:
         """
         final = None
         for sample in self.p_sample_loop_progressive(
-                model,
-                shape,
-                noise=noise,
-                clip_denoised=clip_denoised,
-                denoised_fn=denoised_fn,
-                cond_fn=cond_fn,
-                model_kwargs=model_kwargs,
-                device=device,
-                progress=progress,
+            model,
+            shape,
+            noise=noise,
+            clip_denoised=clip_denoised,
+            denoised_fn=denoised_fn,
+            cond_fn=cond_fn,
+            model_kwargs=model_kwargs,
+            device=device,
+            progress=progress,
         ):
             final = sample
         return final["sample"]
 
     def p_sample_loop_with_snapshot(
-            self,
-            model,
-            shape,
-            noise=None,
-            clip_denoised=True,
-            denoised_fn=None,
-            cond_fn=None,
-            model_kwargs=None,
-            device=None,
-            progress=False,
+        self,
+        model,
+        shape,
+        noise=None,
+        clip_denoised=True,
+        denoised_fn=None,
+        cond_fn=None,
+        model_kwargs=None,
+        device=None,
+        progress=False,
     ):
         """
         Generate samples from the model.
@@ -911,9 +1008,16 @@ class GaussianDiffusion:
         snapshots = {}  # To store snapshots at 25%, 50%, and 75%
 
         total_steps = self.num_timesteps
-        checkpoints = [total_steps // 4, total_steps // 2, total_steps * 3 // 4, total_steps * 0.85, total_steps * 0.95]
+        checkpoints = [
+            total_steps // 4,
+            total_steps // 2,
+            total_steps * 3 // 4,
+            total_steps * 0.85,
+            total_steps * 0.95,
+        ]
 
-        for idx, sample in enumerate(self.p_sample_loop_progressive(
+        for idx, sample in enumerate(
+            self.p_sample_loop_progressive(
                 model,
                 shape,
                 noise=noise,
@@ -923,7 +1027,8 @@ class GaussianDiffusion:
                 model_kwargs=model_kwargs,
                 device=device,
                 progress=progress,
-        )):
+            )
+        ):
             # The idx here starts from 0, so we adjust the calculation accordingly.
             # Since indices are in reverse, calculate the current progress from the end.
             current_progress = idx
@@ -933,7 +1038,9 @@ class GaussianDiffusion:
                 if abs(current_progress - checkpoint) < 1:
                     # Save the current sample as a snapshot at the corresponding percentage
                     percentage = int((current_progress / total_steps) * 100)
-                    snapshots[f"{percentage}%"] = sample["sample"]  # Assuming sample contains the image tensor
+                    snapshots[f"{percentage}%"] = sample[
+                        "sample"
+                    ]  # Assuming sample contains the image tensor
 
             final = sample
 
@@ -942,16 +1049,16 @@ class GaussianDiffusion:
         return final["sample"], snapshots
 
     def p_sample_loop_progressive(
-            self,
-            model,
-            shape,
-            noise=None,
-            clip_denoised=True,
-            denoised_fn=None,
-            cond_fn=None,
-            model_kwargs=None,
-            device=None,
-            progress=False,
+        self,
+        model,
+        shape,
+        noise=None,
+        clip_denoised=True,
+        denoised_fn=None,
+        cond_fn=None,
+        model_kwargs=None,
+        device=None,
+        progress=False,
     ):
         """
         Generate samples from the model and yield intermediate samples from
@@ -968,10 +1075,10 @@ class GaussianDiffusion:
         if noise is not None:
             img = noise
         else:
-            # th.manual_seed(1)
-            img = th.randn(*shape, device=device)
-        if 'y' in model_kwargs:
-            model_kwargs['y'] = model_kwargs['y'].to(device)
+            # torch.manual_seed(1)
+            img = torch.randn(*shape, device=device)
+        if "y" in model_kwargs:
+            model_kwargs["y"] = model_kwargs["y"].to(device)
         indices = list(range(self.num_timesteps))[::-1]
 
         if progress:
@@ -981,9 +1088,9 @@ class GaussianDiffusion:
             indices = tqdm(indices)
 
         for i in indices:
-            t = th.tensor([i] * shape[0], device=device)
+            t = torch.tensor([i] * shape[0], device=device)
             print("timestep: ", t)
-            with th.no_grad():
+            with torch.no_grad():
                 out = self.p_sample(
                     model,
                     img,
@@ -995,12 +1102,11 @@ class GaussianDiffusion:
                 )
                 yield out
                 img = out["sample"]
-    
 
     # ---------------------------- Training Losses --------------------------------
 
     def _vb_terms_bpd(
-            self, model, x_start, x_t, t, clip_denoised=True, model_kwargs=None
+        self, model, x_start, x_t, t, clip_denoised=True, model_kwargs=None
     ):
         """
         Get a term for the variational lower-bound.
@@ -1031,7 +1137,7 @@ class GaussianDiffusion:
 
         # At the first timestep return the decoder NLL,
         # otherwise return KL(q(x_{t-1}|x_t,x_0) || p(x_{t-1}|x_t))
-        output = th.where((t == 0), decoder_nll, kl)
+        output = torch.where((t == 0), decoder_nll, kl)
         return {"output": output, "pred_xstart": out["pred_xstart"]}
 
     def training_losses(self, model, x_start, t, model_kwargs=None, noise=None):
@@ -1050,7 +1156,7 @@ class GaussianDiffusion:
         if model_kwargs is None:
             model_kwargs = {}
         if noise is None:
-            noise = th.randn_like(x_start)
+            noise = torch.randn_like(x_start)
 
         if self.b_maps.device != x_start.device:
             self.b_maps = self.b_maps.to(x_start.device)
@@ -1076,7 +1182,7 @@ class GaussianDiffusion:
             if self.loss_type == LossType.RESCALED_KL:
                 terms["loss"] *= self.num_timesteps
         elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
-            model_output = model(x_t, self._scale_timesteps(t), y=model_kwargs['y'])
+            model_output = model(x_t, self._scale_timesteps(t), y=model_kwargs["y"])
 
             if self.model_var_type in [
                 ModelVarType.LEARNED,
@@ -1084,10 +1190,10 @@ class GaussianDiffusion:
             ]:
                 B, C = x_t.shape[:2]
                 assert model_output.shape == (B, C * 2, *x_t.shape[2:])
-                model_output, model_var_values = th.split(model_output, C, dim=1)
+                model_output, model_var_values = torch.split(model_output, C, dim=1)
                 # Learn the variance using the variational bound, but don't let
                 # it affect our mean prediction.
-                frozen_out = th.cat([model_output.detach(), model_var_values], dim=1)
+                frozen_out = torch.cat([model_output.detach(), model_var_values], dim=1)
                 terms["vb"] = self._vb_terms_bpd(
                     model=lambda *args, r=frozen_out: r,
                     x_start=x_start,
@@ -1115,7 +1221,7 @@ class GaussianDiffusion:
                 terms["loss"] = terms["mse"]
         else:
             raise NotImplementedError(self.loss_type)
-        
+
         return terms
 
     def _prior_bpd(self, x_start):
@@ -1129,7 +1235,7 @@ class GaussianDiffusion:
         :return: a batch of [N] KL values (in bits), one per batch element.
         """
         batch_size = x_start.shape[0]
-        t = th.tensor([self.num_timesteps - 1] * batch_size, device=x_start.device)
+        t = torch.tensor([self.num_timesteps - 1] * batch_size, device=x_start.device)
         qt_mean, _, qt_log_variance = self.q_mean_variance(x_start, t)
         kl_prior = normal_kl(
             mean1=qt_mean, logvar1=qt_log_variance, mean2=0.0, logvar2=0.0
@@ -1161,11 +1267,11 @@ class GaussianDiffusion:
         xstart_mse = []
         mse = []
         for t in list(range(self.num_timesteps))[::-1]:
-            t_batch = th.tensor([t] * batch_size, device=device)
-            noise = th.randn_like(x_start)
+            t_batch = torch.tensor([t] * batch_size, device=device)
+            noise = torch.randn_like(x_start)
             x_t = self.q_sample(x_start=x_start, t=t_batch, noise=noise)
             # Calculate VLB term at the current timestep
-            with th.no_grad():
+            with torch.no_grad():
                 out = self._vb_terms_bpd(
                     model,
                     x_start=x_start,
@@ -1179,9 +1285,9 @@ class GaussianDiffusion:
             eps = self._predict_eps_from_xstart(x_t, t_batch, out["pred_xstart"])
             mse.append(mean_flat((eps - noise) ** 2))
 
-        vb = th.stack(vb, dim=1)
-        xstart_mse = th.stack(xstart_mse, dim=1)
-        mse = th.stack(mse, dim=1)
+        vb = torch.stack(vb, dim=1)
+        xstart_mse = torch.stack(xstart_mse, dim=1)
+        mse = torch.stack(mse, dim=1)
 
         prior_bpd = self._prior_bpd(x_start)
         total_bpd = vb.sum(dim=1) + prior_bpd
@@ -1193,6 +1299,7 @@ class GaussianDiffusion:
             "mse": mse,
         }
 
+
 def _extract_into_tensor(arr, timesteps, broadcast_shape):
     """
     Extract values from a 1-D numpy array for a batch of indices.
@@ -1203,10 +1310,11 @@ def _extract_into_tensor(arr, timesteps, broadcast_shape):
                             dimension equal to the length of timesteps.
     :return: a tensor of shape [batch_size, 1, ...] where the shape has K dims.
     """
-    res = th.from_numpy(arr).to(device=timesteps.device)[timesteps].float()
+    res = torch.from_numpy(arr).to(device=timesteps.device)[timesteps].float()
     while len(res.shape) < len(broadcast_shape):
         res = res[..., None]
     return res.expand(broadcast_shape)
+
 
 def _extract_into_B_tensor(matrix_schedule, timesteps):
     """

@@ -1,5 +1,5 @@
 import numpy as np
-import torch as th
+import torch
 
 from .gaussian_diffusion import GaussianDiffusion
 
@@ -28,7 +28,7 @@ def space_timesteps(num_timesteps, section_counts):
     """
     if isinstance(section_counts, str):
         if section_counts.startswith("ddim"):
-            desired_count = int(section_counts[len("ddim"):])
+            desired_count = int(section_counts[len("ddim") :])
             for i in range(1, num_timesteps):
                 if len(range(0, num_timesteps, i)) == desired_count:
                     return set(range(0, num_timesteps, i))
@@ -88,26 +88,29 @@ class SpacedDiffusion(GaussianDiffusion):
         # do the same for b-maps
         if len(self.use_timesteps) != len(base_diffusion.betas):
             # we need to adjust the b-maps
-            last_matrix_cumprod = th.ones(3, base_diffusion.image_size, base_diffusion.image_size, dtype=base_diffusion.b_cumprod[0].dtype)
+            last_matrix_cumprod = torch.ones(
+                3,
+                base_diffusion.image_size,
+                base_diffusion.image_size,
+                dtype=base_diffusion.b_cumprod[0].dtype,
+            )
             new_b_maps = []
             for i, b_map_cumprod in enumerate(base_diffusion.b_cumprod):
                 if i in self.use_timesteps:
-                    new_b_maps.append(b_map_cumprod / last_matrix_cumprod) # because we don't need to substract one for the definition of b-maps
+                    new_b_maps.append(
+                        b_map_cumprod / last_matrix_cumprod
+                    )  # because we don't need to substract one for the definition of b-maps
                     last_matrix_cumprod = b_map_cumprod
                     # we have already appended the timesteps in the betas, so we don't need to do it again
 
-            kwargs["b_maps"] = th.stack(new_b_maps)
+            kwargs["b_maps"] = torch.stack(new_b_maps)
 
         super().__init__(**kwargs)
 
-    def p_mean_variance(
-            self, model, *args, **kwargs
-    ):  # pylint: disable=signature-differs
+    def p_mean_variance(self, model, *args, **kwargs):  # pylint: disable=signature-differs
         return super().p_mean_variance(self._wrap_model(model), *args, **kwargs)
 
-    def training_losses(
-            self, model, *args, **kwargs
-    ):  # pylint: disable=signature-differs
+    def training_losses(self, model, *args, **kwargs):  # pylint: disable=signature-differs
         return super().training_losses(self._wrap_model(model), *args, **kwargs)
 
     def condition_mean(self, cond_fn, *args, **kwargs):
@@ -136,7 +139,7 @@ class _WrappedModel:
         self.original_num_steps = original_num_steps
 
     def __call__(self, x, ts, **kwargs):
-        map_tensor = th.tensor(self.timestep_map, device=ts.device, dtype=ts.dtype)
+        map_tensor = torch.tensor(self.timestep_map, device=ts.device, dtype=ts.dtype)
         new_ts = map_tensor[ts]
         if self.rescale_timesteps:
             new_ts = new_ts.float() * (1000.0 / self.original_num_steps)
