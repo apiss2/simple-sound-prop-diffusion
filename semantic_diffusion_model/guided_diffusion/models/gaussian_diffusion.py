@@ -18,6 +18,9 @@ import torch.nn.functional as F
 
 from .losses import discretized_gaussian_log_likelihood, normal_kl
 
+CONVEX_PROBES = ["camus"]
+LINEAR_PROBES = ["Linear"]
+
 
 def mean_flat(tensor):
     """
@@ -247,7 +250,7 @@ def matrix_schedule_for_convex_probe(
     channels,
     b_betas,
     epsilon=1,
-    dataset_mode="camus",
+    probe_mode="camus",
     preserve_length=False,
 ):
     """
@@ -264,17 +267,17 @@ def matrix_schedule_for_convex_probe(
         channels (int): The number of channels in each matrix.
         b_betas (np.array): The betas for each timestep.
         epsilon (float): The smallest value the matrices can take, preventing division by zero in subsequent operations.
-        dataset_mode (str): The dataset mode: 'camus'.
+        probe_mode (str): The dataset mode: 'camus'.
         preserve_length (bool): If True, the length of the preserved part of the matrix is proportional to the time factor.
     Returns:
         all_matrices (Tensor): A tensor containing the generated matrices for each timestep.
     """
-    if "camus" in dataset_mode:
+    if probe_mode == "camus":
         long_radius, offset_x, offset_y, opening_angle, short_radius = camus_fan_param(
             matrix_width
         )
     else:
-        raise ValueError("Invalid dataset mode")
+        raise ValueError("Invalid probe mode")
 
     distance_map = create_distance_map(
         offset_x,
@@ -453,7 +456,7 @@ class GaussianDiffusion:
         rescale_timesteps=False,
         image_size=256,
         b_map_min=1.0,
-        dataset_mode="camus",
+        probe_mode="camus",
         b_maps=None,
         preserve_length=False,
     ):
@@ -479,17 +482,17 @@ class GaussianDiffusion:
         if b_maps is not None:
             self.b_maps = b_maps
         else:
-            if dataset_mode == "camus" in dataset_mode:
+            if probe_mode in CONVEX_PROBES:
                 self.b_maps = matrix_schedule_for_convex_probe(
                     self.image_size,
                     self.image_size,
                     3,
                     b_betas=b_betas,
                     epsilon=b_map_min,
-                    dataset_mode=dataset_mode,
+                    probe_mode=probe_mode,
                     preserve_length=preserve_length,
                 )
-            else:
+            elif probe_mode in LINEAR_PROBES:
                 self.b_maps = matrix_schedule_for_linear_probe(
                     self.image_size,
                     self.image_size,

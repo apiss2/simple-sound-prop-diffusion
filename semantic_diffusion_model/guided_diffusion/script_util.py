@@ -1,5 +1,3 @@
-import argparse
-
 from .models import gaussian_diffusion as gd
 from .models.respace import SpacedDiffusion, space_timesteps
 from .models.unet import UNetModel
@@ -37,7 +35,7 @@ def create_model_and_diffusion(cfg):
         timestep_respacing=cfg.TRAIN.DIFFUSION.TIMESTEP_RESPACING,
         image_size=cfg.TRAIN.IMG_SIZE,
         b_map_min=cfg.TRAIN.DIFFUSION.B_MAP_MIN,
-        dataset_mode=cfg.DATASETS.DATASET_MODE,
+        probe_mode=cfg.DATASETS.PROBE_MODE,
         preserve_length=cfg.TRAIN.DIFFUSION.PRESERVE_LENGTH,
         add_buffer=cfg.TRAIN.DIFFUSION.ADD_BUFFER,
     )
@@ -117,7 +115,7 @@ def create_gaussian_diffusion(
     timestep_respacing="",
     image_size=256,
     b_map_min=1.0,
-    dataset_mode="camus",
+    probe_mode="camus",
     preserve_length=False,
     add_buffer=False,
 ):
@@ -153,34 +151,6 @@ def create_gaussian_diffusion(
         rescale_timesteps=rescale_timesteps,
         image_size=image_size,
         b_map_min=b_map_min,
-        dataset_mode=dataset_mode,
+        probe_mode=probe_mode,
         preserve_length=preserve_length,
     )
-
-
-def add_dict_to_argparser(parser, default_dict):
-    for k, v in default_dict.items():
-        v_type = type(v)
-        if v is None:
-            v_type = str
-        elif isinstance(v, bool):
-            v_type = str2bool
-        parser.add_argument(f"--{k}", default=v, type=v_type)
-
-
-def args_to_dict(args, keys):
-    return {k: getattr(args, k) for k in keys}
-
-
-def str2bool(v):
-    """
-    https://stackoverflow.com/questions/15008758/parsing-boolean-values-with-argparse
-    """
-    if isinstance(v, bool):
-        return v
-    if v.lower() in ("yes", "true", "t", "y", "1"):
-        return True
-    elif v.lower() in ("no", "false", "f", "n", "0"):
-        return False
-    else:
-        raise argparse.ArgumentTypeError("boolean value expected")

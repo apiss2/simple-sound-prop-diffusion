@@ -28,7 +28,6 @@ def load_data(cfg):
     label_pathes = sorted([p for p in label_dir.glob("*.png")])
 
     dataset = ImageDataset(
-        cfg.DATASETS.DATASET_MODE,
         cfg.TRAIN.IMG_SIZE,
         image_pathes,
         classes=label_pathes,

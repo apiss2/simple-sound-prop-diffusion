@@ -3,11 +3,10 @@ Train a diffusion model on images.
 """
 
 import json
-from argparse import ArgumentParser
 from datetime import datetime
 from pathlib import Path
 
-from config import add_base_args, cfg, update_config
+from config import cfg
 from guided_diffusion.image_datasets import load_data
 from guided_diffusion.resample import create_named_schedule_sampler
 from guided_diffusion.script_util import (
@@ -16,21 +15,9 @@ from guided_diffusion.script_util import (
 from guided_diffusion.train_util import TrainLoop
 
 
-def get_args_from_command_line():
-    parser = ArgumentParser(description="Parser of Semantic Diffusion Model")
-    parser.add_argument("--datadir", default=cfg.DATASETS.DATADIR, type=str)
-    parser.add_argument("--savedir", default=cfg.DATASETS.SAVE_DIR, type=str)
-    add_base_args(parser, cfg)
-    args = parser.parse_args()
-    return args
-
-
 def main():
-    args = get_args_from_command_line()
-    update_config(args, cfg)
     exp_name = "".join(
         [
-            f"dataset_{cfg.DATASETS.DATASET_MODE}"
             f"b_map_min_{cfg.TRAIN.DIFFUSION.B_MAP_MIN}"
             f"img_size_{cfg.TRAIN.IMG_SIZE}"
             f"lr_{cfg.TRAIN.LR}"

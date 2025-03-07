@@ -3,17 +3,16 @@
 
 import copy
 import functools
-import os
+from os import environ
+from pathlib import Path
 
+import matplotlib.pyplot as plt
 import torch
 import torch.distributed as dist
-from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.optim import AdamW
 
 from .fp16_util import MixedPrecisionTrainer
 from .resample import LossAwareSampler, UniformSampler
-
-import matplotlib.pyplot as plt
 
 # For ImageNet experiments, this was a good default value.
 # We found that the lg_loss_scale quickly climbed to
@@ -116,7 +115,7 @@ class TrainLoop:
                 print("Saving step")
                 self.save()
                 self.sanity_test(batch=batch, device=self.device, cond=cond)
-                if os.environ.get("DIFFUSION_TRAINING_TEST", "") and self.step > 0:
+                if environ.get("DIFFUSION_TRAINING_TEST", "") and self.step > 0:
                     return
 
             self.step += 1
@@ -206,7 +205,7 @@ class TrainLoop:
                     filename = f"model{(self.step + self.resume_step):06d}.pt"
                 else:
                     filename = f"ema_{rate}_{(self.step + self.resume_step):06d}.pt"
-                save_path = os.path.join(self.output_dir, filename)
+                save_path = Path(self.output_dir).joinpath(filename)
                 torch.save(state_dict, save_path)
                 print(f"saved model {rate} to {save_path}")
 
@@ -216,7 +215,7 @@ class TrainLoop:
 
         if dist.get_rank() == 0:
             optimizer_filename = f"opt{(self.step + self.resume_step):06d}.pt"
-            optimizer_path = os.path.join(self.output_dir, optimizer_filename)
+            optimizer_path = Path(self.output_dir).joinpath(optimizer_filename)
             torch.save(self.opt.state_dict(), optimizer_path)
         dist.barrier()
 

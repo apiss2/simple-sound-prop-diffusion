@@ -3,14 +3,13 @@ Generate a large batch of image samples from a model and save them as a large
 numpy array. This can be used to produce samples for FID evaluation.
 """
 
-from argparse import ArgumentParser
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torchvision as tv
-from config import add_base_args, cfg, update_config
+from config import cfg
 from guided_diffusion.image_datasets import load_data
 from guided_diffusion.script_util import (
     create_model_and_diffusion,
@@ -20,22 +19,7 @@ from skimage.color import label2rgb
 from skimage.feature import canny
 
 
-def get_args_from_command_line():
-    parser = ArgumentParser(description="Parser of Semantic Diffusion Model")
-    parser.add_argument("--datadir", default=cfg.DATASETS.DATADIR)
-    parser.add_argument("--savedir", default=cfg.DATASETS.SAVE_DIR)
-    add_base_args(parser, cfg)
-
-    args = parser.parse_args()
-
-    return args
-
-
 def main():
-    args = get_args_from_command_line()
-
-    update_config(args, cfg)
-
     print("creating model and diffusion...")
 
     torch.cuda.empty_cache()
