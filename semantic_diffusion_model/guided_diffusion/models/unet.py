@@ -330,7 +330,6 @@ class ResBlock(TimestepBlock):
 
     :param channels: the number of input channels.
     :param emb_channels: the number of timestep embedding channels.
-    :param dropout: the rate of dropout.
     :param out_channels: if specified, the number of out channels.
     :param use_conv: if True and out_channels is specified, use a spatial
         convolution instead of a smaller 1x1 convolution to change the
@@ -345,7 +344,6 @@ class ResBlock(TimestepBlock):
         self,
         channels,
         emb_channels,
-        dropout,
         out_channels=None,
         use_conv=False,
         use_scale_shift_norm=False,
@@ -357,7 +355,6 @@ class ResBlock(TimestepBlock):
         super().__init__()
         self.channels = channels
         self.emb_channels = emb_channels
-        self.dropout = dropout
         self.out_channels = out_channels or channels
         self.use_conv = use_conv
         self.use_checkpoint = use_checkpoint
@@ -390,7 +387,6 @@ class ResBlock(TimestepBlock):
         self.out_layers = nn.Sequential(
             normalization(self.out_channels),
             SiLU(),
-            nn.Dropout(p=dropout),
             zero_module(
                 conv_nd(dims, self.out_channels, self.out_channels, 3, padding=1)
             ),
@@ -446,7 +442,6 @@ class SDMResBlock(CondTimestepBlock):
 
     :param channels: the number of input channels.
     :param emb_channels: the number of timestep embedding channels.
-    :param dropout: the rate of dropout.
     :param out_channels: if specified, the number of out channels.
     :param use_conv: if True and out_channels is specified, use a spatial
         convolution instead of a smaller 1x1 convolution to change the
@@ -461,7 +456,6 @@ class SDMResBlock(CondTimestepBlock):
         self,
         channels,
         emb_channels,
-        dropout,
         c_channels=3,
         out_channels=None,
         use_conv=False,
@@ -474,7 +468,6 @@ class SDMResBlock(CondTimestepBlock):
         super().__init__()
         self.channels = channels
         self.emb_channels = emb_channels
-        self.dropout = dropout
         self.out_channels = out_channels or channels
         self.use_conv = use_conv
         self.use_checkpoint = use_checkpoint
@@ -507,7 +500,6 @@ class SDMResBlock(CondTimestepBlock):
         self.out_norm = SPADEGroupNorm(self.out_channels, c_channels)
         self.out_layers = nn.Sequential(
             SiLU(),
-            nn.Dropout(p=dropout),
             zero_module(
                 conv_nd(dims, self.out_channels, self.out_channels, 3, padding=1)
             ),
@@ -710,7 +702,6 @@ class UNetModel(nn.Module):
         attention will take place. May be a set, list, or tuple.
         For example, if this contains 4, then at 4x downsampling, attention
         will be used.
-    :param dropout: the dropout probability.
     :param channel_mult: channel multiplier for each level of the UNet.
     :param conv_resample: if True, use learned convolutions for upsampling and
         downsampling.
@@ -737,7 +728,6 @@ class UNetModel(nn.Module):
         out_channels,
         num_res_blocks,
         attention_resolutions,
-        dropout=0,
         channel_mult=(1, 2, 4, 8),
         conv_resample=True,
         dims=2,
@@ -761,7 +751,6 @@ class UNetModel(nn.Module):
         self.out_channels = out_channels
         self.num_res_blocks = num_res_blocks
         self.attention_resolutions = attention_resolutions
-        self.dropout = dropout
         self.channel_mult = channel_mult
         self.conv_resample = conv_resample
         self.num_classes = num_classes
@@ -791,7 +780,6 @@ class UNetModel(nn.Module):
                     ResBlock(
                         ch,
                         time_embed_dim,
-                        dropout,
                         out_channels=int(mult * model_channels),
                         dims=dims,
                         use_checkpoint=use_checkpoint,
@@ -819,7 +807,6 @@ class UNetModel(nn.Module):
                         ResBlock(
                             ch,
                             time_embed_dim,
-                            dropout,
                             out_channels=out_ch,
                             dims=dims,
                             use_checkpoint=use_checkpoint,
@@ -841,7 +828,6 @@ class UNetModel(nn.Module):
             SDMResBlock(
                 ch,
                 time_embed_dim,
-                dropout,
                 c_channels=num_classes,
                 dims=dims,
                 use_checkpoint=use_checkpoint,
@@ -857,7 +843,6 @@ class UNetModel(nn.Module):
             SDMResBlock(
                 ch,
                 time_embed_dim,
-                dropout,
                 c_channels=num_classes,
                 dims=dims,
                 use_checkpoint=use_checkpoint,
@@ -874,7 +859,6 @@ class UNetModel(nn.Module):
                     SDMResBlock(
                         ch + ich,
                         time_embed_dim,
-                        dropout,
                         c_channels=num_classes,
                         out_channels=int(model_channels * mult),
                         dims=dims,
@@ -899,7 +883,6 @@ class UNetModel(nn.Module):
                         SDMResBlock(
                             ch,
                             time_embed_dim,
-                            dropout,
                             c_channels=num_classes,
                             out_channels=out_ch,
                             dims=dims,

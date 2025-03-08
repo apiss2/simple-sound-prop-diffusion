@@ -115,7 +115,6 @@ class ImageDataset(Dataset):
         resolution,
         image_paths,
         classes=None,
-        instances=None,
         shard=0,
         num_shards=1,
         random_crop=False,
@@ -127,9 +126,6 @@ class ImageDataset(Dataset):
         self.resolution = resolution
         self.local_images = image_paths[shard:][::num_shards]
         self.local_classes = None if classes is None else classes[shard:][::num_shards]
-        self.local_instances = (
-            None if instances is None else instances[shard:][::num_shards]
-        )
         self.random_crop = random_crop
         self.random_flip = random_flip
 
@@ -150,37 +146,19 @@ class ImageDataset(Dataset):
             pil_class.load()
         pil_class = pil_class.convert("L")
 
-        if self.local_instances is not None:
-            instance_path = self.local_instances[
-                idx
-            ]  # DEBUG: from classes to instances, may affect CelebA
-            with open(instance_path, "rb") as f:
-                pil_instance = Image.open(f)
-                pil_instance.load()
-            pil_instance = pil_instance.convert("L")
-        else:
-            pil_instance = None
-
-        arr_image, arr_class, arr_instance = resize_arr(
-            [pil_image, pil_class, pil_instance], self.resolution, keep_aspect=False
+        arr_image, arr_class = resize_arr(
+            [pil_image, pil_class], self.resolution, keep_aspect=False
         )
 
         if self.random_flip and random.random() < 0.5:
             arr_image = arr_image[:, ::-1].copy()
             arr_class = arr_class[:, ::-1].copy()
-            arr_instance = (
-                arr_instance[:, ::-1].copy() if arr_instance is not None else None
-            )
 
         arr_image = arr_image.astype(np.float32) / 127.5 - 1
 
         out_dict["path"] = path
         out_dict["label_ori"] = arr_class.copy()
-
         out_dict["label"] = arr_class[None,]
-
-        if arr_instance is not None:
-            out_dict["instance"] = arr_instance[None,]
 
         return np.transpose(arr_image, [2, 0, 1]), out_dict
 
@@ -189,7 +167,7 @@ def resize_arr(pil_list, image_size, keep_aspect=True):
     # We are not on a new enough PIL to support the `reducing_gap`
     # argument, which uses BOX downsampling at powers of two first.
     # Thus, we do it by hand to improve downsample quality.
-    pil_image, pil_class, pil_instance = pil_list
+    pil_image, pil_class = pil_list
 
     while min(*pil_image.size) >= 2 * image_size:
         pil_image = pil_image.resize(
@@ -205,10 +183,7 @@ def resize_arr(pil_list, image_size, keep_aspect=True):
         pil_image = pil_image.resize((image_size, image_size), resample=Image.BICUBIC)
 
     pil_class = pil_class.resize(pil_image.size, resample=Image.NEAREST)
-    if pil_instance is not None:
-        pil_instance = pil_instance.resize(pil_image.size, resample=Image.NEAREST)
 
     arr_image = np.array(pil_image)
     arr_class = np.array(pil_class)
-    arr_instance = np.array(pil_instance) if pil_instance is not None else None
-    return arr_image, arr_class, arr_instance
+    return arr_image, arr_class

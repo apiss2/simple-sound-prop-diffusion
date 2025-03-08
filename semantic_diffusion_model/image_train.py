@@ -9,15 +9,14 @@ from pathlib import Path
 from config import cfg
 from guided_diffusion.image_datasets import load_data
 from guided_diffusion.resample import create_named_schedule_sampler
-from guided_diffusion.script_util import (
-    create_model_and_diffusion,
-)
+from guided_diffusion.script_util import create_model_and_diffusion
 from guided_diffusion.train_util import TrainLoop
 
 
 def main():
-    exp_name = "".join(
+    exp_name = "-".join(
         [
+            f"probe_mode_{cfg.DATASETS.PROBE_MODE}"
             f"b_map_min_{cfg.TRAIN.DIFFUSION.B_MAP_MIN}"
             f"img_size_{cfg.TRAIN.IMG_SIZE}"
             f"lr_{cfg.TRAIN.LR}"
@@ -34,7 +33,6 @@ def main():
     cfg.TRAIN.CHECKPOINT_DIR = cfg.TRAIN.SAVE_DIR
 
     print("creating model and diffusion...")
-
     model, diffusion = create_model_and_diffusion(cfg)
 
     print("Moving model to CUDA (GPU on a single machine)...")
@@ -44,13 +42,11 @@ def main():
     model.convert_to_fp16()
 
     print("creating schedule sampler...")
-
     schedule_sampler = create_named_schedule_sampler(
         cfg.TRAIN.SCHEDULE_SAMPLER, diffusion
     )
 
     print("creating data loader...")
-
     data = load_data(cfg)
 
     jsonpath = Path(cfg.DATASETS.SAVE_DIR).joinpath("train_test_config.json")
@@ -67,7 +63,6 @@ def main():
         batch_size=cfg.TRAIN.BATCH_SIZE,
         lr=cfg.TRAIN.LR,
         ema_rate=cfg.TRAIN.EMA_RATE,
-        drop_rate=cfg.TRAIN.DROP_RATE,
         log_interval=cfg.TRAIN.LOG_INTERVAL,
         save_interval=cfg.TRAIN.SAVE_INTERVAL,
         resume_checkpoint=cfg.TRAIN.RESUME_CHECKPOINT,

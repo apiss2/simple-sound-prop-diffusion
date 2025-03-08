@@ -18,10 +18,8 @@ def create_model_and_diffusion(cfg):
         num_head_channels=cfg.TRAIN.NUM_HEAD_CHANNELS,
         num_heads_upsample=cfg.TRAIN.NUM_HEADS_UPSAMPLE,
         use_scale_shift_norm=cfg.TRAIN.USE_SCALE_SHIFT_NORM,
-        dropout=cfg.TRAIN.DROPOUT,
         resblock_updown=cfg.TRAIN.RESBLOCK_UPDOWN,
         use_new_attention_order=cfg.TRAIN.USE_NEW_ATTENTION_ORDER,
-        no_instance=cfg.TRAIN.NO_INSTANCE,
     )
     diffusion = create_gaussian_diffusion(
         steps=cfg.TRAIN.DIFFUSION_STEPS,
@@ -56,10 +54,8 @@ def create_model(
     num_head_channels=-1,
     num_heads_upsample=-1,
     use_scale_shift_norm=False,
-    dropout=0,
     resblock_updown=False,
     use_new_attention_order=False,
-    no_instance=False,
 ):
     if channel_mult is None:
         if image_size == 512:
@@ -79,8 +75,6 @@ def create_model(
     for res in attention_resolutions.split(","):
         attention_ds.append(image_size // int(res))
 
-    num_classes = num_classes if no_instance else num_classes + 1
-
     return UNetModel(
         image_size=image_size,
         in_channels=3,
@@ -88,7 +82,6 @@ def create_model(
         out_channels=(3 if not learn_sigma else 6),
         num_res_blocks=num_res_blocks,
         attention_resolutions=tuple(attention_ds),
-        dropout=dropout,
         channel_mult=channel_mult,
         num_classes=(num_classes if class_cond else None),
         use_checkpoint=use_checkpoint,

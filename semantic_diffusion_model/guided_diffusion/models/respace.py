@@ -6,25 +6,21 @@ from .gaussian_diffusion import GaussianDiffusion
 
 def space_timesteps(num_timesteps, section_counts):
     """
-    Create a list of timesteps to use from an original diffusion process,
-    given the number of timesteps we want to take from equally-sized portions
-    of the original process.
+    元の拡散プロセスから使用するタイムステップのリストを作成します。
+    元のプロセスの等しい部分から取得したいタイムステップの数が与えられた場合に使用します。
 
-    For example, if there's 300 timesteps and the section counts are [10,15,20]
-    then the first 100 timesteps are strided to be 10 timesteps, the second 100
-    are strided to be 15 timesteps, and the final 100 are strided to be 20.
+    例えば、300タイムステップがあり、セクションカウントが [10, 15, 20] の場合、
+    最初の100タイムステップは10ステップに間引かれ、次の100ステップは15ステップに間引かれ、
+    最後の100ステップは20ステップに間引かれます。
 
-    If the stride is a string starting with "", then the fixed striding
-    from the  paper is used, and only one section is allowed.
+    もしストライドが "" で始まる文字列の場合、論文で使用された固定ストライドが使用され、
+    セクションは1つだけ許可されます。
 
-    :param num_timesteps: the number of diffusion steps in the original
-                          process to divide up.
-    :param section_counts: either a list of numbers, or a string containing
-                           comma-separated numbers, indicating the step count
-                           per section. As a special case, use "ddimN" where N
-                           is a number of steps to use the striding from the
-                           DDIM paper.
-    :return: a set of diffusion steps from the original process to use.
+    :param num_timesteps: 元のプロセスにおける拡散ステップの総数。
+    :param section_counts: セクションごとのステップ数を示す数値のリスト、またはカンマ区切りの数値文字列。
+                          特別なケースとして、"ddimN" という形式の文字列を使用すると、
+                          DDIM論文で使用されたストライドが適用されます（Nはステップ数）。
+    :return: 元のプロセスから使用する拡散ステップのセット。
     """
     if isinstance(section_counts, str):
         if section_counts.startswith("ddim"):
@@ -62,11 +58,10 @@ def space_timesteps(num_timesteps, section_counts):
 
 class SpacedDiffusion(GaussianDiffusion):
     """
-    A diffusion process which can skip steps in a base diffusion process.
+    ベースの拡散プロセスでステップをスキップできる拡散プロセス。
 
-    :param use_timesteps: a collection (sequence or set) of timesteps from the
-                          original diffusion process to retain.
-    :param kwargs: the kwargs to create the base diffusion process.
+    :param use_timesteps: 元の拡散プロセスから保持するタイムステップのコレクション（シーケンスまたはセット）。
+    :param kwargs: ベースの拡散プロセスを作成するためのキーワード引数。
     """
 
     def __init__(self, use_timesteps, **kwargs):

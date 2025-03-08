@@ -8,7 +8,6 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import torch
-import torch.distributed as dist
 from torch.optim import AdamW
 
 from .fp16_util import MixedPrecisionTrainer
@@ -44,7 +43,6 @@ class TrainLoop:
         batch_size,
         lr,
         ema_rate,
-        drop_rate,
         log_interval,
         save_interval,
         fp16_scale_growth=1e-3,
@@ -67,7 +65,6 @@ class TrainLoop:
             if isinstance(ema_rate, float)
             else [float(x) for x in ema_rate.split(",")]
         )
-        self.drop_rate = drop_rate
         self.log_interval = log_interval
         self.save_interval = save_interval
         self.fp16_scale_growth = fp16_scale_growth
@@ -78,7 +75,6 @@ class TrainLoop:
 
         self.step = 0
         self.resume_step = 0
-        self.global_batch = self.batch_size * dist.get_world_size()
 
         self.sync_cuda = torch.cuda.is_available()
 
@@ -147,7 +143,7 @@ class TrainLoop:
 
             compute_losses = functools.partial(
                 self.diffusion.training_losses,
-                self.ddp_model,
+                self.model,
                 micro,
                 t,
                 model_kwargs=micro_cond,
@@ -157,7 +153,7 @@ class TrainLoop:
                 losses = compute_losses()
 
             else:
-                with self.ddp_model.no_sync():
+                with self.model.no_sync():
                     losses = compute_losses()
 
             loss = (losses["loss"] * weights).mean()
@@ -199,25 +195,22 @@ class TrainLoop:
     def save(self):
         def save_checkpoint(rate, params):
             state_dict = self.mp_trainer.master_params_to_state_dict(params)
-            if dist.get_rank() == 0:
-                print(f"saving model {rate}...")
-                if not rate:
-                    filename = f"model{(self.step + self.resume_step):06d}.pt"
-                else:
-                    filename = f"ema_{rate}_{(self.step + self.resume_step):06d}.pt"
-                save_path = Path(self.output_dir).joinpath(filename)
-                torch.save(state_dict, save_path)
-                print(f"saved model {rate} to {save_path}")
+            print(f"saving model {rate}...")
+            if not rate:
+                filename = f"model{(self.step + self.resume_step):06d}.pt"
+            else:
+                filename = f"ema_{rate}_{(self.step + self.resume_step):06d}.pt"
+            save_path = Path(self.output_dir).joinpath(filename)
+            torch.save(state_dict, save_path)
+            print(f"saved model {rate} to {save_path}")
 
         save_checkpoint(0, self.mp_trainer.master_params)
         for rate, params in zip(self.ema_rate, self.ema_params):
             save_checkpoint(rate, params)
 
-        if dist.get_rank() == 0:
-            optimizer_filename = f"opt{(self.step + self.resume_step):06d}.pt"
-            optimizer_path = Path(self.output_dir).joinpath(optimizer_filename)
-            torch.save(self.opt.state_dict(), optimizer_path)
-        dist.barrier()
+        optimizer_filename = f"opt{(self.step + self.resume_step):06d}.pt"
+        optimizer_path = Path(self.output_dir).joinpath(optimizer_filename)
+        torch.save(self.opt.state_dict(), optimizer_path)
 
     def sanity_test(self, batch, device, cond):
         src_img = ((batch + 1.0) / 2.0).to(device)
@@ -250,17 +243,6 @@ class TrainLoop:
         nc = self.num_classes
         input_label = torch.FloatTensor(bs, nc, h, w).zero_()
         input_semantics = input_label.scatter_(1, label_map, 1.0)
-
-        if "instance" in data:
-            inst_map = data["instance"]
-            instance_edge_map = self.get_edges(inst_map)
-            input_semantics = torch.cat((input_semantics, instance_edge_map), dim=1)
-
-        if self.drop_rate > 0.0:
-            mask = (
-                torch.rand([input_semantics.shape[0], 1, 1, 1]) > self.drop_rate
-            ).float()
-            input_semantics = input_semantics * mask
 
         cond = {
             key: value
