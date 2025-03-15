@@ -1,0 +1,6 @@
+pytorch
+transformers
+accelerate
+diffusers
+datasets
+# bitsandbytes  # optional
