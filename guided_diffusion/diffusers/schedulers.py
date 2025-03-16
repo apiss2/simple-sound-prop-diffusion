@@ -82,9 +82,10 @@ class DDPMTrainingScheduler(DDPMScheduler):
         """
         snr = pick_tensor(self.snr, timesteps).to(timesteps.device)
         min_snr_k = (
-            torch.stack([snr, float(k) * torch.ones_like(timesteps)], dim=1).min(dim=1)[
-                0
-            ]
+            torch.stack(
+                [snr, float(k) * torch.ones_like(timesteps, device=timesteps.device)],
+                dim=1,
+            ).min(dim=1)[0]
             / snr
         )
         return min_snr_k
@@ -117,20 +118,20 @@ class DDPMTrainingScheduler(DDPMScheduler):
         assert isinstance(timesteps, (torch.Tensor, list, np.ndarray)), (
             "timesteps should be a list..."
         )
-        prev_ts = self.previous_timesteps(timesteps)
+        prev_ts = self.previous_timesteps(timesteps).to("cpu")
         # To compute β_pos : https://arxiv.org/pdf/2006.11239.pdf (7)
-        alpha_prod_ts = pick_tensor(self.alphas_cumprod, timesteps)
+        alpha_prod_ts = pick_tensor(self.alphas_cumprod, timesteps).to("cpu")
         alpha_prod_ts_prev = torch.where(
             prev_ts > 0,
-            pick_tensor(self.alphas_cumprod, prev_ts),
-            torch.ones_like(prev_ts),
+            pick_tensor(self.alphas_cumprod, prev_ts).to("cpu"),
+            torch.ones_like(prev_ts, device="cpu"),
         )
         current_alpha_ts = alpha_prod_ts / alpha_prod_ts_prev
         current_beta_ts = 1 - current_alpha_ts
         posterior_var = (1 - alpha_prod_ts_prev) / (1 - alpha_prod_ts) * current_beta_ts
         # In order to have the same shape than every other
         posterior_var = adapt_tensor(posterior_var, sample_0) * torch.ones_like(
-            sample_0
+            sample_0, device=timesteps.device
         )
         # To compute µ_pos : https://arxiv.org/pdf/2006.11239.pdf (7)
         coef_x0 = torch.sqrt(alpha_prod_ts_prev) * current_beta_ts / (1 - alpha_prod_ts)
@@ -162,13 +163,13 @@ class DDPMTrainingScheduler(DDPMScheduler):
         assert isinstance(timesteps, (torch.Tensor, list, np.ndarray)), (
             "timesteps should be a list..."
         )
-        prev_ts = self.previous_timesteps(timesteps)
+        prev_ts = self.previous_timesteps(timesteps).to("cpu")
 
-        alpha_prod_ts = pick_tensor(self.alphas_cumprod, timesteps)
+        alpha_prod_ts = pick_tensor(self.alphas_cumprod, timesteps).to("cpu")
         alpha_prod_ts_prev = torch.where(
             prev_ts > 0,
-            pick_tensor(self.alphas_cumprod, prev_ts),
-            torch.ones_like(prev_ts),
+            pick_tensor(self.alphas_cumprod, prev_ts).to("cpu"),
+            torch.ones_like(prev_ts, device="cpu"),
         )
         current_beta_ts = 1 - alpha_prod_ts / alpha_prod_ts_prev
 

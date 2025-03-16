@@ -25,7 +25,6 @@ from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import ProjectConfiguration, set_seed
 from packaging import version
-from sis_dataset import CELEBAHQ_DICT, SISDataset
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
@@ -52,7 +51,7 @@ parser.add_argument("--dataset_img_size", type=int, default=64)
 parser.add_argument("--dataset_cls_count", type=int, default=19)
 parser.add_argument("--train_batch_size", type=int, default=2)
 parser.add_argument("--train_ucond_prob", type=float, default=0.1)
-parser.add_argument("--max_train_steps", type=int, default=10)
+parser.add_argument("--max_train_steps", type=int, default=1000_000)
 parser.add_argument(
     "--ddp_variance_type",
     type=str,
@@ -181,8 +180,28 @@ parser.add_argument("--use_ema", type=bool, default=True)
 parser.add_argument("--debug", action="store_true", default=False)
 
 
+class ImagePreprocessor:
+    def __init__(self, dataset_img_size):
+        self.dataset_img_size = dataset_img_size
+
+    def __call__(self, examples):
+        transforms_img = Compose(
+            [Resize(self.dataset_img_size), ToTensor(), Normalize(0.5, 0.5)]
+        )
+        transform_msk = Compose(
+            [Resize(self.dataset_img_size, interpolation=InterpolationMode.NEAREST)]
+        )
+        examples["image"] = [
+            transforms_img(image.convert("RGB")) for image in examples["image"]
+        ]
+        examples["annotation"] = [
+            np.array(transform_msk(image)) for image in examples["annotation"]
+        ]
+        return examples
+
+
 def main(
-    dataset_name_or_path: str,
+    dataset_path: str,
     dataset_img_size: int,
     dataset_cls_count: str,
     output_dir: str,
@@ -245,34 +264,22 @@ def main(
     # Manage Seed
     set_seed(seed)
     # We create a Dataset and Dataloaders
-    if os.path.exists(dataset_name_or_path):
-        dataset = load_from_disk(dataset_name_or_path)
+    if os.path.exists(dataset_path):
+        dataset = load_from_disk(dataset_path)
     else:
-        dataset = load_dataset(dataset_name_or_path)
+        raise FileNotFoundError(dataset_path)
     # We create train / val dataset...
     train_dataset = dataset["train"]
     if NMAX:
         train_indices = np.arange(min(len(train_dataset), NMAX))
+    else:
+        train_indices = np.arange(len(train_dataset))
+
     test_dataset = dataset["test"]
     test_indices = np.arange(min(len(train_dataset), val_num_samples))
 
-    def transform(examples):
-        transforms_img = Compose(
-            [Resize(dataset_img_size), ToTensor(), Normalize(0.5, 0.5)]
-        )
-        transform_msk = Compose(
-            [Resize(dataset_img_size, interpolation=InterpolationMode.NEAREST)]
-        )
-        examples["image"] = [
-            transforms_img(image.convert("RGB")) for image in examples["image"]
-        ]
-        examples["annotation"] = [
-            np.array(transform_msk(image)) for image in examples["annotation"]
-        ]
-        return examples
-
-    train_dataset.set_transform(transform)
-    test_dataset.set_transform(transform)
+    train_dataset.set_transform(ImagePreprocessor(dataset_img_size))
+    test_dataset.set_transform(ImagePreprocessor(dataset_img_size))
 
     train_dataloader = DataLoader(
         Subset(train_dataset, train_indices),

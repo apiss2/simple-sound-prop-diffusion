@@ -10,7 +10,7 @@ from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.unets.unet_2d import UNet2DOutput
 from diffusers.utils import logging
 
-from .layers import SISHeadAttnBlock, get_down_block, get_up_block
+from layers import SISHeadAttnBlock, get_down_block, get_up_block
 
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name

@@ -7,8 +7,8 @@ from diffusers.pipelines.pipeline_utils import DiffusionPipeline, ImagePipelineO
 from diffusers.schedulers import DDPMScheduler
 from diffusers.utils.torch_utils import randn_tensor
 
-from .models import UNet2DSISModel
-from .autoencoder import AutoencoderKL
+from models import UNet2DSISModel
+from autoencoder import AutoencoderKL
 
 
 class SemanticOnlyDDMPipeline(DiffusionPipeline):
