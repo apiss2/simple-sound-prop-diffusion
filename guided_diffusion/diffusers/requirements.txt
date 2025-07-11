@@ -1,7 +1,0 @@
-pytorch
-transformers
-accelerate
-diffusers
-datasets
-tensorboard
-# bitsandbytes  # optional
